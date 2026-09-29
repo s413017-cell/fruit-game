@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>水果切切樂</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #1a0f07;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden">
+    <!-- Top HUD Bar -->
+    <div class="absolute top-4 left-4 right-4 flex justify-between items-center pointer-events-none z-10">
+        <!-- Score Display -->
+        <div class="bg-amber-950/85 border-2 border-amber-600/70 rounded-2xl px-5 py-2 text-white shadow-xl backdrop-blur-md flex items-center gap-3">
+            <span class="text-amber-400 text-xs font-bold tracking-wider">SCORE</span>
+            <span id="scoreText" class="text-3xl font-black text-amber-200 tracking-wide">0</span>
+            <span id="multiplierBadge" class="hidden bg-yellow-400 text-amber-950 text-xs font-black px-2.5 py-1 rounded-full animate-bounce shadow-md">2X (5s)</span>
+        </div>
+
+        <!-- Timer Display -->
+        <div class="bg-amber-950/85 border-2 border-amber-600/70 rounded-2xl px-5 py-2 text-white shadow-xl backdrop-blur-md flex items-center gap-3">
+            <span class="text-amber-400 text-xs font-bold tracking-wider">TIME</span>
+            <span id="timerText" class="text-3xl font-black text-amber-200 tracking-wide">60</span>
+        </div>
+    </div>
+
+    <!-- Start Modal -->
+    <div id="startModal" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-30 backdrop-blur-md">
+        <div class="bg-gradient-to-b from-amber-900 to-amber-950 border-4 border-amber-500/80 rounded-3xl p-7 text-center shadow-2xl max-w-md w-11/12">
+            <h1 class="text-4xl font-extrabold text-amber-300 mb-2 drop-shadow tracking-wider">🍉 水果切切樂</h1>
+            <p class="text-amber-200/80 mb-5 text-sm">劃開所有飛出的水果，展現你的極速刀法！</p>
+            
+            <!-- Game Instructions -->
+            <div class="bg-amber-950/80 rounded-2xl p-4 mb-6 border border-amber-700/60 text-left space-y-2.5 text-sm text-amber-100">
+                <div class="flex items-center gap-3">
+                    <span class="text-xl">🗡️</span>
+                    <span>按住滑鼠或手指滑動進行揮刀切擊</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xl">⏰</span>
+                    <span>切中加時鬧鐘可額外獲得 <strong class="text-sky-300">5 秒</strong>時間</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xl">⭐️</span>
+                    <span>切中雙倍星星可啟動 <strong class="text-yellow-300">10 秒分數 2 倍</strong> 獎勵</span>
+                </div>
+                <div class="flex items-center gap-3 text-rose-300">
+                    <span class="text-xl">💣</span>
+                    <span>小心炸彈！切中會扣除 <strong class="text-rose-400">15 分</strong></span>
+                </div>
+            </div>
+
+            <button id="startBtn" class="w-full py-4 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-amber-950 font-black text-2xl rounded-2xl shadow-xl transition active:scale-95 border-2 border-yellow-200 cursor-pointer">
+                開始遊戲 ⚔️
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over Overlay -->
+    <div id="gameOverModal" class="hidden absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-30 backdrop-blur-md">
+        <div class="bg-gradient-to-b from-amber-900 to-amber-950 border-4 border-amber-500/80 rounded-3xl p-8 text-center shadow-2xl max-w-md w-11/12">
+            <h2 class="text-3xl font-black text-amber-300 mb-2">時間結束！</h2>
+            <p class="text-amber-200/80 mb-6 text-base">最終得分</p>
+            <div id="finalScore" class="text-6xl font-black text-yellow-300 mb-8 drop-shadow">0</div>
+            <button id="restartBtn" class="w-full py-4 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-amber-950 font-black text-2xl rounded-2xl shadow-xl transition active:scale-95 border-2 border-yellow-200 cursor-pointer">
+                再玩一次 🔄
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // Audio Synthesizer (Web Audio API)
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playSliceSound() {
+            if (!audioCtx) return;
+            try {
+                const now = audioCtx.currentTime;
+                // Gentle brush sound for slicing
+                const bufferSize = audioCtx.sampleRate * 0.08;
+                const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = audioCtx.createBufferSource();
+                noise.buffer = buffer;
+
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.setValueAtTime(1200, now);
+                filter.frequency.exponentialRampToValueAtTime(300, now + 0.08);
+
+                const gain = audioCtx.createGain();
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                noise.start(now);
+
+                // Slice impact sound
+                const osc = audioCtx.createOscillator();
+                const oscGain = audioCtx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(220, now);
+                osc.frequency.exponentialRampToValueAtTime(60, now + 0.06);
+
+                oscGain.gain.setValueAtTime(0.2, now);
+                oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
+
+                osc.connect(oscGain);
+                oscGain.connect(audioCtx.destination);
+
+                osc.start(now);
+                osc.stop(now + 0.06);
+            } catch (e) {}
+        }
+
+        function playBonusSound() {
+            if (!audioCtx) return;
+            try {
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.15); // A5
+
+                gain.gain.setValueAtTime(0.18, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            } catch (e) {}
+        }
+
+        function playBombSound() {
+            if (!audioCtx) return;
+            try {
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.linearRampToValueAtTime(40, now + 0.25);
+
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now);
+                osc.stop(now + 0.25);
+            } catch (e) {}
+        }
+
+        const svgTextures = {
+            apple: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <defs>
+                    <radialGradient id="apG" cx="35%" cy="30%" r="70%">
+                        <stop offset="0%" stop-color="#fca5a5"/>
+                        <stop offset="40%" stop-color="#ef4444"/>
+                        <stop offset="100%" stop-color="#7f1d1d"/>
+                    </radialGradient>
+                </defs>
+                <path d="M50 88 C30 88 15 70 15 45 C15 25 32 20 50 28 C68 20 85 25 85 45 C85 70 70 88 50 88 Z" fill="url(#apG)"/>
+                <path d="M50 28 Q48 10 58 8" stroke="#78350f" stroke-width="4" fill="none" stroke-linecap="round"/>
+                <path d="M54 18 Q68 12 70 24 Q58 24 54 18 Z" fill="#22c55e"/>
+                <ellipse cx="35" cy="35" rx="8" ry="14" fill="#ffffff" opacity="0.25" transform="rotate(-25 35 35)"/>
+            </svg>`,
+
+            apple_half: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <path d="M50 12 C75 12 88 30 88 55 C88 80 72 88 50 88 Z" fill="#991b1b"/>
+                <path d="M50 16 C70 16 82 32 82 55 C82 76 68 84 50 84 Z" fill="#fef08a"/>
+                <ellipse cx="50" cy="52" rx="10" ry="16" fill="#fef9c3"/>
+                <ellipse cx="58" cy="48" rx="2.5" ry="4" fill="#451a03" transform="rotate(15 58 48)"/>
+            </svg>`,
+
+            watermelon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <defs>
+                    <radialGradient id="wmG" cx="30%" cy="25%" r="75%">
+                        <stop offset="0%" stop-color="#86efac"/>
+                        <stop offset="30%" stop-color="#22c55e"/>
+                        <stop offset="70%" stop-color="#15803d"/>
+                        <stop offset="100%" stop-color="#022c22"/>
+                    </radialGradient>
+                </defs>
+                <circle cx="50" cy="50" r="42" fill="url(#wmG)"/>
+                <path d="M15 32 C 25 15, 40 12, 50 8 C 38 30, 28 50, 20 75 Z" fill="#064e3b" opacity="0.85"/>
+                <path d="M30 14 C 45 35, 38 65, 30 90 C 42 78, 52 50, 48 10 Z" fill="#064e3b" opacity="0.85"/>
+                <path d="M52 8 C 58 35, 66 65, 58 92 C 70 82, 72 52, 68 12 Z" fill="#064e3b" opacity="0.85"/>
+                <path d="M70 15 C 78 35, 82 58, 85 70 C 88 50, 85 30, 82 22 Z" fill="#064e3b" opacity="0.85"/>
+                <ellipse cx="32" cy="28" rx="10" ry="18" fill="#ffffff" opacity="0.28" transform="rotate(-30 32 28)"/>
+                <ellipse cx="26" cy="22" rx="3" ry="6" fill="#ffffff" opacity="0.4" transform="rotate(-30 26 22)"/>
+            </svg>`,
+
+            watermelon_half: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <path d="M50 8 A42 42 0 0 1 50 92 Z" fill="#15803d"/>
+                <path d="M50 12 A38 38 0 0 1 50 88 Z" fill="#dcfce7"/>
+                <path d="M50 16 A34 34 0 0 1 50 84 Z" fill="#ef4444"/>
+                <ellipse cx="64" cy="32" rx="2.5" ry="5" fill="#09090b" transform="rotate(25 64 32)"/>
+                <ellipse cx="72" cy="50" rx="2.5" ry="5" fill="#09090b"/>
+                <ellipse cx="62" cy="68" rx="2.5" ry="5" fill="#09090b" transform="rotate(-20 62 68)"/>
+            </svg>`,
+
+            banana: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <defs>
+                    <linearGradient id="baBodyG" x1="10%" y1="10%" x2="90%" y2="90%">
+                        <stop offset="0%" stop-color="#fef08a"/>
+                        <stop offset="35%" stop-color="#facc15"/>
+                        <stop offset="80%" stop-color="#eab308"/>
+                        <stop offset="100%" stop-color="#854d0e"/>
+                    </linearGradient>
+                    <linearGradient id="baHighlight" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.75"/>
+                        <stop offset="100%" stop-color="#fef08a" stop-opacity="0"/>
+                    </linearGradient>
+                </defs>
+                <path d="M 18,22 C 30,85 78,92 90,44 C 74,72 38,70 24,38 C 21,32 19,26 18,22 Z" fill="url(#baBodyG)" stroke="#713f12" stroke-width="2"/>
+                <path d="M 18,22 C 32,88 78,90 90,44 C 76,80 34,76 18,22 Z" fill="#eab308" opacity="0.35"/>
+                <path d="M 22,26 C 36,75 74,78 88,44 C 76,64 42,62 26,36 Z" fill="#fef08a" opacity="0.6"/>
+                <path d="M 21,24 C 32,68 70,72 86,43" stroke="url(#baHighlight)" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+                <path d="M 18,22 L 10,12 Q 8,9 12,8 Q 16,9 19,16 Z" fill="#4d7c0f" stroke="#1f2937" stroke-width="1"/>
+                <path d="M 90,44 L 96,48 L 93,51 Z" fill="#2d1500"/>
+            </svg>`,
+
+            banana_half: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <path d="M50 20 Q70 35 80 60 L50 60 Z" fill="#eab308"/>
+                <path d="M50 24 Q66 37 74 56 L50 56 Z" fill="#fef9c3"/>
+                <circle cx="58" cy="42" r="1.5" fill="#713f12"/>
+            </svg>`,
+
+            pineapple: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <defs>
+                    <radialGradient id="paBody" cx="40%" cy="35%" r="65%">
+                        <stop offset="0%" stop-color="#fef08a"/>
+                        <stop offset="50%" stop-color="#eab308"/>
+                        <stop offset="100%" stop-color="#854d0e"/>
+                    </radialGradient>
+                </defs>
+                <path d="M50 35 Q30 20 20 5 Q40 18 50 35 Q60 18 80 5 Q70 20 50 35 Z" fill="#15803d"/>
+                <path d="M50 35 Q38 12 32 0 Q45 15 50 35 Q55 15 68 0 Q62 12 50 35 Z" fill="#22c55e"/>
+                <rect x="22" y="32" width="56" height="60" rx="28" fill="url(#paBody)"/>
+                <path d="M30 42 Q38 36 46 42 Q54 36 62 42 M26 54 Q34 48 42 54 Q50 48 58 54 Q66 48 74 54 M26 66 Q34 60 42 66 Q50 60 58 66 Q66 60 74 66 M30 78 Q38 72 46 78 Q54 72 62 78" stroke="#713f12" stroke-width="2.5" fill="none" opacity="0.6"/>
+                <circle cx="38" cy="48" r="2" fill="#fef08a"/><circle cx="50" cy="48" r="2" fill="#fef08a"/><circle cx="62" cy="48" r="2" fill="#fef08a"/>
+                <circle cx="34" cy="60" r="2" fill="#fef08a"/><circle cx="46" cy="60" r="2" fill="#fef08a"/><circle cx="58" cy="60" r="2" fill="#fef08a"/>
+                <circle cx="38" cy="72" r="2" fill="#fef08a"/><circle cx="50" cy="72" r="2" fill="#fef08a"/><circle cx="62" cy="72" r="2" fill="#fef08a"/>
+            </svg>`,
+
+            pineapple_half: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <path d="M50 30 L50 92 A28 28 0 0 0 78 64 L78 30 Z" fill="#854d0e"/>
+                <path d="M50 34 L50 88 A24 24 0 0 0 74 64 L74 34 Z" fill="#fef08a"/>
+                <path d="M50 34 L50 88 L58 88 L58 34 Z" fill="#fde047" opacity="0.8"/>
+            </svg>`,
+
+            strawberry: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <defs>
+                    <radialGradient id="sbG" cx="35%" cy="30%" r="70%">
+                        <stop offset="0%" stop-color="#f87171"/>
+                        <stop offset="50%" stop-color="#dc2626"/>
+                        <stop offset="100%" stop-color="#7f1d1d"/>
+                    </radialGradient>
+                </defs>
+                <path d="M50 90 C78 78 86 48 80 28 C76 18 24 18 20 28 C14 48 22 78 50 90 Z" fill="url(#sbG)"/>
+                <path d="M30 22 Q50 30 70 22 Q50 10 30 22 Z" fill="#22c55e"/>
+                <circle cx="36" cy="38" r="1.8" fill="#fef08a"/><circle cx="50" cy="42" r="1.8" fill="#fef08a"/>
+                <circle cx="64" cy="38" r="1.8" fill="#fef08a"/><circle cx="42" cy="58" r="1.8" fill="#fef08a"/>
+                <circle cx="58" cy="58" r="1.8" fill="#fef08a"/><circle cx="50" cy="74" r="1.8" fill="#fef08a"/>
+            </svg>`,
+
+            strawberry_half: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <path d="M50 20 C76 20 84 48 78 74 L50 90 Z" fill="#991b1b"/>
+                <path d="M50 24 C70 24 78 48 72 70 L50 84 Z" fill="#fecdd3"/>
+                <path d="M50 30 C62 30 68 48 64 62 L50 72 Z" fill="#ffffff"/>
+            </svg>`,
+
+            orange: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <defs>
+                    <radialGradient id="ogG" cx="38%" cy="35%" r="65%">
+                        <stop offset="0%" stop-color="#fef08a"/>
+                        <stop offset="35%" stop-color="#fb923c"/>
+                        <stop offset="75%" stop-color="#f97316"/>
+                        <stop offset="100%" stop-color="#9a3412"/>
+                    </radialGradient>
+                    <linearGradient id="ogLeaf" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#4ade80"/>
+                        <stop offset="100%" stop-color="#15803d"/>
+                    </linearGradient>
+                </defs>
+                <circle cx="50" cy="54" r="38" fill="url(#ogG)"/>
+                <circle cx="36" cy="48" r="1" fill="#ea580c" opacity="0.6"/>
+                <circle cx="44" cy="62" r="1.2" fill="#ea580c" opacity="0.6"/>
+                <circle cx="60" cy="56" r="1" fill="#ea580c" opacity="0.6"/>
+                <circle cx="54" cy="72" r="1.2" fill="#ea580c" opacity="0.6"/>
+                <circle cx="32" cy="64" r="1" fill="#ea580c" opacity="0.5"/>
+                <ellipse cx="36" cy="38" rx="9" ry="15" fill="#ffffff" opacity="0.28" transform="rotate(-25 36 38)"/>
+                <ellipse cx="50" cy="18" rx="4" ry="2" fill="#7c2d12"/>
+                <path d="M50 18 Q48 10 50 8" stroke="#451a03" stroke-width="3" stroke-linecap="round" fill="none"/>
+                <path d="M50 12 Q68 2 74 16 Q58 22 50 12 Z" fill="url(#ogLeaf)" stroke="#166534" stroke-width="1.2"/>
+                <path d="M50 12 Q61 11 74 16" stroke="#bbf7d0" stroke-width="1" fill="none" opacity="0.7"/>
+                <path d="M49 14 Q35 6 30 18 Q42 22 49 14 Z" fill="url(#ogLeaf)" stroke="#166534" stroke-width="1"/>
+            </svg>`,
+
+            orange_half: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="40" fill="#c2410c"/>
+                <circle cx="50" cy="50" r="36" fill="#ffed4a"/>
+                <path d="M50 14 L50 86 M14 50 L86 50 M24 24 L76 76 M24 76 L76 24" stroke="#f97316" stroke-width="3"/>
+            </svg>`,
+
+            clock: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="40" fill="#0284c7" stroke="#e0f2fe" stroke-width="4"/>
+                <circle cx="50" cy="50" r="32" fill="#38bdf8"/>
+                <path d="M50 24 L50 50 L66 50" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+                <circle cx="50" cy="50" r="4" fill="#ffffff"/>
+            </svg>`,
+
+            star: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <polygon points="50,8 63,35 93,38 71,58 78,87 50,71 22,87 29,58 7,38 37,35" fill="#facc15" stroke="#fef08a" stroke-width="3"/>
+                <text x="50" y="58" font-size="22" font-weight="900" fill="#78350f" text-anchor="middle">2X</text>
+            </svg>`,
+
+            bomb: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <circle cx="50" cy="55" r="35" fill="#18181b" stroke="#3f3f46" stroke-width="3"/>
+                <path d="M50 20 Q55 10 65 12" stroke="#78350f" stroke-width="4" fill="none"/>
+                <circle cx="65" cy="12" r="5" fill="#ef4444"/>
+                <ellipse cx="38" cy="42" rx="6" ry="12" fill="#ffffff" opacity="0.2" transform="rotate(-20 38 42)"/>
+            </svg>`
+        };
+
+        const fruitCanvasMap = {};
+        function preRenderSVGs() {
+            Object.keys(svgTextures).forEach(key => {
+                const cvs = document.createElement('canvas');
+                cvs.width = 120;
+                cvs.height = 120;
+                const cctx = cvs.getContext('2d');
+                const img = new Image();
+                img.onload = () => {
+                    cctx.drawImage(img, 0, 0, 120, 120);
+                };
+                img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svgTextures[key]);
+                fruitCanvasMap[key] = cvs;
+            });
+        }
+        preRenderSVGs();
+
+        const fruitJuiceColors = {
+            apple: '#ef4444',
+            watermelon: '#ef4444',
+            banana: '#fef08a',
+            pineapple: '#eab308',
+            strawberry: '#f43f5e',
+            orange: '#f97316'
+        };
+
+        class JuiceSplatter {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.alpha = 0.75;
+                this.drops = [];
+                const count = 10 + Math.floor(Math.random() * 7);
+                for (let i = 0; i < count; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = Math.random() * 38;
+                    this.drops.push({
+                        dx: Math.cos(angle) * dist,
+                        dy: Math.sin(angle) * dist,
+                        r: 2 + Math.random() * 5.5
+                    });
+                }
+            }
+
+            draw(targetCtx) {
+                targetCtx.save();
+                targetCtx.globalAlpha = Math.max(0, this.alpha);
+                targetCtx.fillStyle = this.color;
+
+                this.drops.forEach(d => {
+                    targetCtx.beginPath();
+                    targetCtx.arc(this.x + d.dx, this.y + d.dy, d.r, 0, Math.PI * 2);
+                    targetCtx.fill();
+                });
+                targetCtx.restore();
+            }
+        }
+
+        class JuiceParticle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 3 + Math.random() * 6;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.radius = 3 + Math.random() * 4;
+                this.gravity = 0.22;
+                this.alpha = 1;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += this.gravity;
+                this.alpha -= 0.025;
+            }
+
+            draw(targetCtx) {
+                targetCtx.save();
+                targetCtx.globalAlpha = Math.max(0, this.alpha);
+                targetCtx.fillStyle = this.color;
+                targetCtx.beginPath();
+                targetCtx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                targetCtx.fill();
+                targetCtx.restore();
+            }
+        }
+
+        class TextPopup {
+            constructor(text, x, y, color) {
+                this.text = text;
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.vy = -2;
+                this.alpha = 1;
+            }
+
+            update() {
+                this.y += this.vy;
+                this.alpha -= 0.02;
+            }
+
+            draw(targetCtx) {
+                targetCtx.save();
+                targetCtx.globalAlpha = Math.max(0, this.alpha);
+                targetCtx.fillStyle = this.color;
+                targetCtx.font = '900 26px sans-serif';
+                targetCtx.textAlign = 'center';
+                targetCtx.shadowColor = 'rgba(0,0,0,0.5)';
+                targetCtx.shadowBlur = 6;
+                targetCtx.fillText(this.text, this.x, this.y);
+                targetCtx.restore();
+            }
+        }
+
+        class HalfFruit {
+            constructor(type, x, y, isRight) {
+                this.type = type;
+                this.x = x;
+                this.y = y;
+                this.radius = type === 'banana' ? 52 : (type === 'pineapple' ? 44 : (type === 'watermelon' ? 42 : 36));
+                this.vx = (isRight ? 1 : -1) * (2 + Math.random() * 3);
+                this.vy = -3 - Math.random() * 2;
+                this.gravity = 0.22;
+                this.rotation = Math.random() * Math.PI * 2;
+                this.vRot = (isRight ? 1 : -1) * (0.08 + Math.random() * 0.05);
+                this.alpha = 1;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += this.gravity;
+                this.rotation += this.vRot;
+                this.alpha -= 0.012;
+            }
+
+            draw(targetCtx) {
+                targetCtx.save();
+                targetCtx.globalAlpha = Math.max(0, this.alpha);
+                targetCtx.translate(this.x, this.y);
+                targetCtx.rotate(this.rotation);
+
+                const cvs = fruitCanvasMap[this.type + '_half'] || fruitCanvasMap[this.type];
+                if (cvs) {
+                    targetCtx.drawImage(cvs, -this.radius, -this.radius, this.radius * 2, this.radius * 2);
+                }
+                targetCtx.restore();
+            }
+        }
+
+        class Fruit {
+            constructor(type) {
+                this.type = type;
+                this.radius = type === 'banana' ? 52 : (type === 'pineapple' ? 44 : (type === 'watermelon' ? 42 : 36));
+                this.x = Math.random() * (Math.max(300, width) - 200) + 100;
+                this.y = height + this.radius;
+
+                // High Arc Physics (Stays upper 15%~33% screen)
+                const targetY = height * (0.15 + Math.random() * 0.18);
+                const gravity = 0.2;
+                const distY = Math.max(10, this.y - targetY);
+
+                this.vy = -Math.sqrt(2 * gravity * distY);
+                this.gravity = gravity;
+
+                const targetX = width * 0.2 + Math.random() * (width * 0.6);
+                const timeToPeak = Math.max(1, Math.abs(this.vy) / gravity);
+                this.vx = (targetX - this.x) / timeToPeak;
+
+                this.rotation = Math.random() * Math.PI * 2;
+                this.vRot = (Math.random() - 0.5) * 0.05;
+                this.isSliced = false;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += this.gravity;
+                this.rotation += this.vRot;
+            }
+
+            draw(targetCtx) {
+                if (this.isSliced) return;
+                targetCtx.save();
+                targetCtx.translate(this.x, this.y);
+                targetCtx.rotate(this.rotation);
+
+                targetCtx.shadowColor = 'rgba(0,0,0,0.3)';
+                targetCtx.shadowBlur = 10;
+                targetCtx.shadowOffsetY = 12;
+
+                const cvs = fruitCanvasMap[this.type];
+                if (cvs) {
+                    targetCtx.drawImage(cvs, -this.radius, -this.radius, this.radius * 2, this.radius * 2);
+                }
+                targetCtx.restore();
+            }
+        }
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width = canvas.width = Math.max(300, window.innerWidth || 300);
+        let height = canvas.height = Math.max(300, window.innerHeight || 300);
+
+        const bgCanvas = document.createElement('canvas');
+        const bgCtx = bgCanvas.getContext('2d');
+        bgCanvas.width = width;
+        bgCanvas.height = height;
+
+        function drawWoodBackground() {
+            if (width <= 0 || height <= 0) return;
+            bgCtx.fillStyle = '#2d180c';
+            bgCtx.fillRect(0, 0, width, height);
+
+            const plankHeight = 80;
+            bgCtx.strokeStyle = '#1a0e07';
+            bgCtx.lineWidth = 4;
+
+            for (let y = 0; y < height; y += plankHeight) {
+                bgCtx.fillStyle = (Math.floor(y / plankHeight) % 2 === 0) ? '#382012' : '#2e190e';
+                bgCtx.fillRect(0, y, width, plankHeight);
+                bgCtx.beginPath();
+                bgCtx.moveTo(0, y);
+                bgCtx.lineTo(width, y);
+                bgCtx.stroke();
+            }
+
+            const grad = bgCtx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.3, width / 2, height / 2, Math.max(width, height) * 0.8);
+            grad.addColorStop(0, 'rgba(0,0,0,0)');
+            grad.addColorStop(1, 'rgba(0,0,0,0.65)');
+            bgCtx.fillStyle = grad;
+            bgCtx.fillRect(0, 0, width, height);
+        }
+
+        function resizeCanvas() {
+            width = canvas.width = Math.max(300, window.innerWidth || 300);
+            height = canvas.height = Math.max(300, window.innerHeight || 300);
+            bgCanvas.width = width;
+            bgCanvas.height = height;
+            drawWoodBackground();
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let score = 0;
+        let gameTime = 60;
+        let isGameOver = false;
+        let isGameStarted = false;
+        let gameStartTime = Date.now();
+        let lastSpawnTime = Date.now();
+        let scoreMultiplier = 1;
+        let multiplierEndTime = 0;
+
+        let fruits = [];
+        let halfFruits = [];
+        let juiceSplatters = [];
+        let juiceParticles = [];
+        let textPopups = [];
+        let trailPoints = [];
+        let isMouseDown = false;
+
+        function checkSegmentCircleIntersect(p1, p2, circle) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const lenSq = dx * dx + dy * dy;
+            if (lenSq === 0) {
+                const distSq = (circle.x - p1.x) ** 2 + (circle.y - p1.y) ** 2;
+                return distSq <= circle.radius ** 2;
+            }
+            let t = ((circle.x - p1.x) * dx + (circle.y - p1.y) * dy) / lenSq;
+            t = Math.max(0, Math.min(1, t));
+            const nearestX = p1.x + t * dx;
+            const nearestY = p1.y + t * dy;
+            const distSq = (circle.x - nearestX) ** 2 + (circle.y - nearestY) ** 2;
+            return distSq <= circle.radius ** 2;
+        }
+
+        function handlePointerMove(x, y) {
+            if (!isMouseDown) return;
+            const now = Date.now();
+            trailPoints.push({ x, y, time: now });
+
+            trailPoints = trailPoints.filter(p => now - p.time < 150);
+
+            if (trailPoints.length < 2) return;
+
+            const p1 = trailPoints[trailPoints.length - 2];
+            const p2 = trailPoints[trailPoints.length - 1];
+
+            let cutCount = 0;
+
+            fruits.forEach(f => {
+                if (!f.isSliced && checkSegmentCircleIntersect(p1, p2, f)) {
+                    f.isSliced = true;
+
+                    if (f.type === 'bomb') {
+                        playBombSound();
+                        score = Math.max(0, score - 15);
+                        textPopups.push(new TextPopup('-15', f.x, f.y, '#f43f5e'));
+                    } else if (f.type === 'clock') {
+                        playBonusSound();
+                        gameTime += 5;
+                        const bonusPts = 30 * scoreMultiplier;
+                        score += bonusPts;
+                        textPopups.push(new TextPopup('+5s & 30', f.x, f.y, '#38bdf8'));
+                    } else if (f.type === 'star') {
+                        playBonusSound();
+                        multiplierEndTime = Date.now() + 10000;
+                        const bonusPts = 30 * scoreMultiplier;
+                        score += bonusPts;
+                        textPopups.push(new TextPopup('2X 雙倍10秒!', f.x, f.y, '#facc15'));
+                    } else {
+                        playSliceSound();
+                        const earnedPoints = 10 * scoreMultiplier;
+                        score += earnedPoints;
+                        cutCount++;
+
+                        textPopups.push(new TextPopup(`${earnedPoints}`, f.x, f.y, '#fef08a'));
+
+                        halfFruits.push(new HalfFruit(f.type, f.x, f.y, false));
+                        halfFruits.push(new HalfFruit(f.type, f.x, f.y, true));
+
+                        const jColor = fruitJuiceColors[f.type] || '#ef4444';
+                        juiceSplatters.push(new JuiceSplatter(f.x, f.y, jColor));
+                        
+                        for (let i = 0; i < 10; i++) {
+                            juiceParticles.push(new JuiceParticle(f.x, f.y, jColor));
+                        }
+                    }
+                }
+            });
+
+            if (cutCount >= 3) {
+                const bonus = 45 * scoreMultiplier;
+                score += bonus;
+                textPopups.push(new TextPopup(`COMBO! ${bonus}`, p2.x, p2.y - 20, '#f43f5e'));
+            } else if (cutCount === 2) {
+                const bonus = 20 * scoreMultiplier;
+                score += bonus;
+                textPopups.push(new TextPopup(`COMBO! ${bonus}`, p2.x, p2.y - 20, '#fb923c'));
+            }
+
+            document.getElementById('scoreText').innerText = score;
+            document.getElementById('timerText').innerText = Math.ceil(gameTime);
+        }
+
+        window.addEventListener('mousedown', e => {
+            isMouseDown = true;
+            trailPoints = [];
+            handlePointerMove(e.clientX, e.clientY);
+        });
+        window.addEventListener('mousemove', e => handlePointerMove(e.clientX, e.clientY));
+        window.addEventListener('mouseup', () => { isMouseDown = false; trailPoints = []; });
+
+        window.addEventListener('touchstart', e => {
+            isMouseDown = true;
+            trailPoints = [];
+            if (e.touches.length > 0) handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
+        });
+        window.addEventListener('touchmove', e => {
+            if (e.touches.length > 0) handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
+        });
+        window.addEventListener('touchend', () => { isMouseDown = false; trailPoints = []; });
+
+        function spawnFruitWave() {
+            const types = ['apple', 'watermelon', 'banana', 'pineapple', 'strawberry', 'orange'];
+            const elapsed = (Date.now() - gameStartTime) / 1000;
+
+            let count = 1;
+            if (elapsed > 5) {
+                count = Math.floor(Math.random() * 2) + 3; // 3 ~ 4 fruits after 5 seconds
+            }
+
+            for (let i = 0; i < count; i++) {
+                setTimeout(() => {
+                    if (isGameOver || !isGameStarted) return;
+                    let type = types[Math.floor(Math.random() * types.length)];
+                    
+                    const rand = Math.random();
+                    if (rand < 0.02) type = 'clock';
+                    else if (rand < 0.06) type = 'star';
+                    else if (rand < 0.14) type = 'bomb';
+
+                    fruits.push(new Fruit(type));
+                }, i * 200);
+            }
+        }
+
+        function gameLoop() {
+            if (width > 0 && height > 0 && bgCanvas.width > 0 && bgCanvas.height > 0) {
+                ctx.drawImage(bgCanvas, 0, 0);
+            } else {
+                ctx.fillStyle = '#2d180c';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            if (isGameStarted && !isGameOver) {
+                gameTime -= 1 / 60;
+                document.getElementById('timerText').innerText = Math.max(0, Math.ceil(gameTime));
+
+                const nowMs = Date.now();
+                const badge = document.getElementById('multiplierBadge');
+                if (nowMs < multiplierEndTime) {
+                    scoreMultiplier = 2;
+                    const remSec = Math.ceil((multiplierEndTime - nowMs) / 1000);
+                    if (badge) {
+                        badge.innerText = `2X (${remSec}s)`;
+                        badge.classList.remove('hidden');
+                    }
+                } else {
+                    scoreMultiplier = 1;
+                    if (badge) {
+                        badge.classList.add('hidden');
+                    }
+                }
+
+                if (gameTime <= 0) {
+                    isGameOver = true;
+                    document.getElementById('finalScore').innerText = score;
+                    document.getElementById('gameOverModal').classList.remove('hidden');
+                }
+
+                if (Date.now() - lastSpawnTime > 2200) {
+                    spawnFruitWave();
+                    lastSpawnTime = Date.now();
+                }
+            }
+
+            // Render Splatters (Fade out gracefully over 6-8s)
+            juiceSplatters.forEach(s => {
+                s.alpha -= 0.001;
+                s.draw(ctx);
+            });
+            juiceSplatters = juiceSplatters.filter(s => s.alpha > 0);
+
+            // Render Juice Particles
+            juiceParticles = juiceParticles.filter(p => p.alpha > 0);
+            juiceParticles.forEach(p => {
+                p.update();
+                p.draw(ctx);
+            });
+
+            // Render Fruits
+            fruits = fruits.filter(f => !f.isSliced && f.y < height + 100);
+            fruits.forEach(f => {
+                f.update();
+                f.draw(ctx);
+            });
+
+            // Render Half Fruits
+            halfFruits = halfFruits.filter(hf => hf.alpha > 0 && hf.y < height + 100);
+            halfFruits.forEach(hf => {
+                hf.update();
+                hf.draw(ctx);
+            });
+
+            // Render Text Popups
+            textPopups = textPopups.filter(tp => tp.alpha > 0);
+            textPopups.forEach(tp => {
+                tp.update();
+                tp.draw(ctx);
+            });
+
+            // Render Blade Trail (Glowing Yellow)
+            const now = Date.now();
+            trailPoints = trailPoints.filter(p => now - p.time < 150);
+
+            if (trailPoints.length > 1) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(trailPoints[0].x, trailPoints[0].y);
+                for (let i = 1; i < trailPoints.length; i++) {
+                    ctx.lineTo(trailPoints[i].x, trailPoints[i].y);
+                }
+                ctx.strokeStyle = '#fef08a';
+                ctx.lineWidth = 6;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.shadowColor = '#fde047';
+                ctx.shadowBlur = 12;
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        document.getElementById('startBtn').addEventListener('click', () => {
+            initAudio();
+            document.getElementById('startModal').classList.add('hidden');
+            score = 0;
+            gameTime = 60;
+            scoreMultiplier = 1;
+            multiplierEndTime = 0;
+            isGameOver = false;
+            isGameStarted = true;
+            gameStartTime = Date.now();
+            lastSpawnTime = Date.now();
+
+            fruits = [];
+            halfFruits = [];
+            juiceSplatters = [];
+            juiceParticles = [];
+            textPopups = [];
+            trailPoints = [];
+
+            document.getElementById('scoreText').innerText = '0';
+            document.getElementById('timerText').innerText = '60';
+        });
+
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            score = 0;
+            gameTime = 60;
+            scoreMultiplier = 1;
+            multiplierEndTime = 0;
+            isGameOver = false;
+            isGameStarted = true;
+            gameStartTime = Date.now();
+            lastSpawnTime = Date.now();
+
+            fruits = [];
+            halfFruits = [];
+            juiceSplatters = [];
+            juiceParticles = [];
+            textPopups = [];
+            trailPoints = [];
+
+            document.getElementById('scoreText').innerText = '0';
+            document.getElementById('timerText').innerText = '60';
+            document.getElementById('gameOverModal').classList.add('hidden');
+        });
+
+        // Start render loop
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
