@@ -1,8 +1,8 @@
 
-# 🍉 水果切切樂 (Fruit Ninja Web)
+# 🍉 水果切切樂 (Fruit Game)
 
 ## 📖 1. 作品名稱
-**水果切切樂 / Fruit Ninja Web**
+**水果切切樂 / Fruit Game**
 
 ---
 
