@@ -1,11 +1,16 @@
-# 🍉 水果切切樂 (Fruit game)
+# 🍉 水果切切樂 (Fruit Ninja Web)
 
 ## 📖 1. 作品名稱
-**水果切切樂 / Fruit game**
+**水果切切樂 / Fruit Ninja Web**
 
 ---
 
 ## 🎮 2. 遊戲玩法與視覺呈現
+
+<p align="center">
+  <img src="images/gameplay.png" alt="水果切切樂遊戲畫面" width="700">
+</p>
+
 * **視覺風格**：採用 HTML5 Canvas 搭配 Tailwind CSS 打造高質感介面，包含木紋質感背景、外圍暗角陰影與透明模糊（Backdrop Blur）彈窗。
 * **核心機制**：
   * **拋物線飛出**：水果與道具從螢幕下方隨機拋出，呈現自然重力墜落軌跡。
