@@ -74,4 +74,4 @@
 ---
 
 ## 🔗 6. 作品連結
-👉 **線上試玩**：[https://s413017-cell.github.io/fruit-game/](https://s413017-cell.github.io/fruit-game/)
+👉 **線上試玩**：[https://s413017-cell.github.io/fruit_game/](https://s413017-cell.github.io/fruit_game/)
